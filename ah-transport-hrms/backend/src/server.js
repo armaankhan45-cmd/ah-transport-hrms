@@ -131,14 +131,29 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', company: config.COMPANY_NAME, time: new Date().toISOString(), version: '1.0.0' });
 });
 
-// Serve frontend
-const publicDir = path.join(__dirname, '..', '..', '..', 'frontend', 'public');
+// Serve frontend – robust multi-path resolver
+const publicCandidates = [
+  path.join(__dirname, '..', '..', 'frontend', 'public'),
+  path.join(__dirname, '..', '..', '..', 'frontend', 'public'),
+  path.join(process.cwd(), 'public'),
+  path.join(process.cwd(), 'frontend', 'public'),
+  path.join(process.cwd(), '..', 'frontend', 'public'),
+  path.join(process.cwd(), '..', '..', 'frontend', 'public'),
+  '/opt/render/project/src/frontend/public',
+  '/opt/render/project/src/ah-transport-hrms/frontend/public',
+  path.join(__dirname, '..', 'public')
+];
+let publicDir = publicCandidates.find(p => { try { return fs.existsSync(p) && fs.existsSync(path.join(p, 'index.html')); } catch {return false} }) || publicCandidates[0];
+console.log(`[HRMS] Frontend dir: ${publicDir} exists=${fs.existsSync(publicDir)}`);
 if (fs.existsSync(publicDir)) {
   app.use(express.static(publicDir));
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api')) return next();
-    res.sendFile(path.join(publicDir, 'index.html'));
+    res.sendFile(path.join(publicDir, 'index.html'), err => { if (err) next(); });
   });
+} else {
+  console.warn('[HRMS] WARNING frontend not found – checked:', publicCandidates.join(', '));
+  app.get('/', (req, res) => { res.type('html').send('<h2>A.H. Transport HRMS API running ✅</h2><p><a href="/api/health">/api/health</a> – <a href="/api/auth/login">login API</a><p>Frontend uploading…')});
 }
 
 // error handler
