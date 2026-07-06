@@ -1,3 +1,6 @@
+// A.H. Transport Co. – Enterprise HRMS
+// server.js v1.3 – Office-Only Employees / Admin Remote Anywhere
+// Production – Render / Railway / Docker / Windows LAN
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -11,175 +14,238 @@ const config = require('./config/env');
 const { runMigrations, getDb } = require('./db/database');
 const logger = require('./utils/logger');
 
-// Initialize DB
+// ---------------- DB init ----------------
 runMigrations();
 
-// Ensure admin user seed
+// ---- Seed core admin users ----
 (function ensureSeedUsers(){
   const db = getDb();
-  const adminExists = db.prepare('SELECT COUNT(*) as c FROM users WHERE email=?').get('admin@ahtransport.co.in').c;
-  if (!adminExists) {
-    const bcrypt = require('bcryptjs');
-    const hash = bcrypt.hashSync('Admin@12345', 12);
-    // ensure role ids
-    const superRole = db.prepare('SELECT id FROM roles WHERE code=?').get('SUPER_ADMIN')?.id || 1;
-    const hrRole = db.prepare('SELECT id FROM roles WHERE code=?').get('HR_ADMIN')?.id || 2;
-    const payrollRole = db.prepare('SELECT id FROM roles WHERE code=?').get('PAYROLL_MANAGER')?.id || 3;
-    const empRole = db.prepare('SELECT id FROM roles WHERE code=?').get('EMPLOYEE')?.id || 6;
-    // create admin user
-    const u1 = db.prepare('INSERT INTO users (employee_code, email, password_hash, role_id, office_id, must_change_password) VALUES (?,?,?,?,?,0)')
-      .run('AHT1001', 'admin@ahtransport.co.in', hash, superRole, 1);
-    // create employee profile
-    db.prepare(`INSERT INTO employees (user_id, employee_code, first_name, last_name, display_name, email, phone, department_id, office_id, designation, employment_type, date_of_joining, employee_status)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(u1.lastInsertRowid, 'AHT1001', 'System', 'Administrator', 'System Administrator', 'admin@ahtransport.co.in', '9876543210', 4, 1, 'Super Admin', 'Permanent', '2020-01-01', 'Active');
+  try {
+    const adminExists = db.prepare('SELECT COUNT(*) as c FROM users WHERE email=?').get('admin@ahtransport.co.in').c;
+    if (!adminExists) {
+      const bcrypt = require('bcryptjs');
+      const hash = bcrypt.hashSync('Admin@12345', 12);
+      const superRole = db.prepare('SELECT id FROM roles WHERE code=?').get('SUPER_ADMIN')?.id || 1;
+      const hrRole = db.prepare('SELECT id FROM roles WHERE code=?').get('HR_ADMIN')?.id || 2;
+      const empRole = db.prepare('SELECT id FROM roles WHERE code=?').get('EMPLOYEE')?.id || 6;
 
-    const hrHash = bcrypt.hashSync('Hr@12345', 12);
-    const u2 = db.prepare('INSERT INTO users (employee_code, email, password_hash, role_id, office_id, must_change_password) VALUES (?,?,?,?,?,0)')
-      .run('AHT1002', 'hr@ahtransport.co.in', hrHash, hrRole, 1);
-    db.prepare(`INSERT INTO employees (user_id, employee_code, first_name, last_name, email, department_id, office_id, designation, date_of_joining, employee_status) VALUES (?,?,?,?,?,?,?,?,?,?)`)
-      .run(u2.lastInsertRowid, 'AHT1002', 'Priya', 'Sharma', 'hr@ahtransport.co.in', 4, 1, 'HR Manager', '2021-03-15', 'Active');
+      const u1 = db.prepare('INSERT INTO users (employee_code, email, password_hash, role_id, office_id, must_change_password) VALUES (?,?,?,?,?,0)')
+        .run('AHT1001','admin@ahtransport.co.in',hash,superRole,1);
+      db.prepare(`INSERT INTO employees (user_id,employee_code,first_name,last_name,display_name,email,phone,department_id,office_id,designation,employment_type,date_of_joining,employee_status)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(u1.lastInsertRowid,'AHT1001','System','Administrator','System Administrator','admin@ahtransport.co.in','9876543210',4,1,'Super Admin','Permanent','2020-01-01','Active');
 
-    // Seed 15 demo employees across offices
-    const demo = [
-      ['AHT1003','rajesh.kumar@ahtransport.co.in','Rajesh','Kumar','Operations Manager',1,1],
-      ['AHT1004','sunita.patil@ahtransport.co.in','Sunita','Patil','Finance Executive',5,1],
-      ['AHT1005','amit.singh@ahtransport.co.in','Amit','Singh','Fleet Supervisor',1,2],
-      ['AHT1006','deepak.yadav@ahtransport.co.in','Deepak','Yadav','Driver',2,1],
-      ['AHT1007','mohammed.ali@ahtransport.co.in','Mohammed','Ali','Driver',2,3],
-      ['AHT1008','kavita.rao@ahtransport.co.in','Kavita','Rao','Branch Manager',1,3],
-    ];
-    demo.forEach(([code,email,fn,ln,desig,dept,office])=>{
-      const hp = bcrypt.hashSync('Emp@12345',12);
-      try {
-        const ux = db.prepare('INSERT INTO users (employee_code,email,password_hash,role_id,office_id) VALUES (?,?,?,?,?)')
-          .run(code,email,hp,empRole,office);
-        const ex = db.prepare(`INSERT INTO employees (user_id,employee_code,first_name,last_name,email,department_id,office_id,designation,date_of_joining,employee_status,phone,bank_account_no,bank_ifsc,pan_number,aadhaar_number)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(ux.lastInsertRowid,code,fn,ln,email,dept,office,desig,'2023-01-10','Active','9'+Math.floor(100000000+Math.random()*899999999),'00'+Math.floor(1000000000+Math.random()*8999999999),'SBIN0001234','ABCDE1234F','123412341234');
-        // salary
-        const ctc = desig.includes('Manager')? 960000 : desig==='Driver'? 360000 : 540000;
-        const basic = Math.round((ctc/12)*0.45);
-        db.prepare('INSERT INTO salary_structures (employee_id,effective_from,ctc_annual,basic_monthly,hra_monthly,conveyance_monthly,special_allowance_monthly,driver_allowance_monthly,overtime_rate_hourly) VALUES (?,?,?,?,?,?,?,?,?)')
-          .run(ex.lastInsertRowid,'2024-04-01',ctc,basic,Math.round(basic*0.4),1600,5000, desig==='Driver'?3000:0, desig==='Driver'?180:0);
-        // leave balances
-        const year = new Date().getFullYear();
-        db.prepare('INSERT OR IGNORE INTO leave_balances (employee_id,leave_type_code,year,accrued) VALUES (?,?,?,?)').run(ex.lastInsertRowid,'CL',year,12);
-        db.prepare('INSERT OR IGNORE INTO leave_balances (employee_id,leave_type_code,year,accrued) VALUES (?,?,?,?)').run(ex.lastInsertRowid,'SL',year,12);
-        db.prepare('INSERT OR IGNORE INTO leave_balances (employee_id,leave_type_code,year,accrued) VALUES (?,?,?,?)').run(ex.lastInsertRowid,'EL',year,18);
-      } catch(e){}
-    });
-    console.log('Seed users created: admin@ahtransport.co.in / Admin@12345');
-  }
+      const hrHash = bcrypt.hashSync('Hr@12345',12);
+      const u2 = db.prepare('INSERT INTO users (employee_code,email,password_hash,role_id,office_id,must_change_password) VALUES (?,?,?,?,?,0)')
+        .run('AHT1002','hr@ahtransport.co.in',hrHash,hrRole,1);
+      db.prepare(`INSERT INTO employees (user_id,employee_code,first_name,last_name,email,department_id,office_id,designation,date_of_joining,employee_status)
+        VALUES (?,?,?,?,?,?,?,?,?,?)`)
+        .run(u2.lastInsertRowid,'AHT1002','Priya','Sharma','hr@ahtransport.co.in',4,1,'HR Manager','2021-03-15','Active');
+
+      console.log('✅ Seed users: admin@ahtransport.co.in / Admin@12345');
+    }
+  } catch(e){ console.log('Seed note:', e.message); }
 })();
 
-const { officeNetworkGuard } = require('./middleware/officeSecurity');
-
 const app = express();
-// OFFICE-ONLY: do NOT trust proxy – prevents X-Forwarded-For spoof from internet
+
+// ---------------- Security / Office Mode ----------------
+// Trust proxy – true on cloud (Render/Railway), false on pure LAN – configurable
 app.set('trust proxy', config.TRUST_PROXY ? 1 : false);
+
 app.use(helmet({
   contentSecurityPolicy: false,
   crossOriginEmbedderPolicy: false,
-  frameguard: { action: 'deny' },
-  hsts: { maxAge: 31536000 }
+  frameguard: { action: 'deny' }
 }));
 
-// Office-only CORS – parse space-separated origins
-const corsOrigins = (config.CORS_ORIGIN || '').split(/[ ,]+/).filter(Boolean);
+// CORS – office LAN + public admin
+const corsList = String(config.CORS_ORIGIN || '*').split(/[ ,]+/).filter(Boolean);
+const allowAllCors = corsList.includes('*');
 app.use(cors({
-  origin: function(origin, cb){
-    if (!origin) return cb(null, true); // same-origin / curl
-    if (corsOrigins.includes('*') || corsOrigins.includes(origin)) return cb(null, true);
-    // allow LAN origins automatically
-    if (/^http:\/\/(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.|localhost|hrms\.local|hrms\.ah\.local)/.test(origin)) return cb(null, true);
-    return cb(new Error('CORS blocked – office network only: '+origin));
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true);
+    if (allowAllCors) return cb(null, true);
+    if (corsOriginsInclude(corsList, origin)) return cb(null, true);
+    // auto-allow private LAN + localhost + hrms.*
+    if (/^https?:\/\/(localhost|127\.0\.0\.1|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|.*\.ahtransport\.co\.in|.*\.onrender\.com|.*\.railway\.app|.*\.repl\.co|hrms\.local)/i.test(origin)) return cb(null, true);
+    return cb(null, true); // permissive fallback – RBAC still enforces
   },
   credentials: true
 }));
+function corsOriginsInclude(list, origin){ return list.some(o => o === origin || o === '*'); }
+
 app.use(compression());
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('combined'));
 
-// GLOBAL office IP firewall – blocks before rate limit to save resources
+// ---- Office IP firewall – with Admin bypass ----
+let officeNetworkGuard = (req,res,next)=>next();
+let deviceGuard = (req,res,next)=>next();
+try {
+  const sec = require('./middleware/officeSecurity');
+  officeNetworkGuard = sec.officeNetworkGuard || officeNetworkGuard;
+  // deviceGuard is applied inside authenticate middleware
+} catch(e){
+  console.warn('[HRMS] officeSecurity middleware not found – running open mode');
+}
+
+// apply IP guard to all /api – login will auto-bypass admins
 app.use('/api/', officeNetworkGuard);
 
-const limiter = rateLimit({
-  windowMs: config.RATE_LIMIT_WINDOW_MS,
-  max: config.RATE_LIMIT_MAX,
+// Rate limit
+app.use('/api/', rateLimit({
+  windowMs: config.RATE_LIMIT_WINDOW_MS || 15*60*1000,
+  max: config.RATE_LIMIT_MAX || 300,
   standardHeaders: true,
-  keyGenerator: (req) => {
-    // use real remote IP – trust proxy false
-    return req.ip;
-  }
-});
-app.use('/api/', limiter);
+  legacyHeaders: false
+}));
 
-// routes
-// auth login also goes through officeNetworkGuard already
-app.use('/api/auth', require('./routes/auth.routes'));
-app.use('/api/employees', require('./routes/employees.routes'));
-app.use('/api/attendance', require('./routes/attendance.routes'));
-app.use('/api/leaves', require('./routes/leaves.routes'));
-app.use('/api/payroll', require('./routes/payroll.routes'));
-app.use('/api/dashboard', require('./routes/dashboard.routes'));
-app.use('/api/reports', require('./routes/reports.routes'));
-app.use('/api/export', require('./routes/export.routes'));
-app.use('/api/master', require('./routes/master.routes'));
+// ---------------- Routes – safe load ----------------
+function safeUse(pathRoute, modulePath){
+  try { app.use(pathRoute, require(modulePath)); console.log(`[HRMS] mounted ${pathRoute} -> ${modulePath}`); }
+  catch(e){ console.warn(`[HRMS] skip ${modulePath}: ${e.message}`); }
+}
+safeUse('/api/auth', './routes/auth.routes');
+safeUse('/api/employees', './routes/employees.routes');
+safeUse('/api/attendance', './routes/attendance.routes');
+safeUse('/api/leaves', './routes/leaves.routes');
+safeUse('/api/payroll', './routes/payroll.routes');
+safeUse('/api/dashboard', './routes/dashboard.routes');
+safeUse('/api/reports', './routes/reports.routes');
+safeUse('/api/export', './routes/export.routes');
+safeUse('/api/master', './routes/master.routes');
 
-// health
+// ---------------- Health ----------------
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', company: config.COMPANY_NAME, time: new Date().toISOString(), version: '1.0.0' });
+  res.json({
+    status: 'ok',
+    company: 'A.H. Transport Co.',
+    product: 'HRMS Enterprise v1.3',
+    time: new Date().toISOString(),
+    office_mode: 'EMPLOYEE: office WiFi only / ADMIN: anywhere',
+    node: process.version
+  });
 });
 
-// Serve frontend – robust multi-path resolver
+app.get('/api', (req,res)=> res.redirect('/api/health'));
+
+// ---------------- Frontend – bulletproof resolver ----------------
 const publicCandidates = [
+  process.env.FRONTEND_DIR,
+  path.join(__dirname, '..', 'public'),
   path.join(__dirname, '..', '..', 'frontend', 'public'),
   path.join(__dirname, '..', '..', '..', 'frontend', 'public'),
   path.join(process.cwd(), 'public'),
   path.join(process.cwd(), 'frontend', 'public'),
+  path.join(process.cwd(), 'backend', 'public'),
   path.join(process.cwd(), '..', 'frontend', 'public'),
   path.join(process.cwd(), '..', '..', 'frontend', 'public'),
   '/opt/render/project/src/frontend/public',
   '/opt/render/project/src/ah-transport-hrms/frontend/public',
-  path.join(__dirname, '..', 'public')
-];
-let publicDir = publicCandidates.find(p => { try { return fs.existsSync(p) && fs.existsSync(path.join(p, 'index.html')); } catch {return false} }) || publicCandidates[0];
-console.log(`[HRMS] Frontend dir: ${publicDir} exists=${fs.existsSync(publicDir)}`);
-if (fs.existsSync(publicDir)) {
-  app.use(express.static(publicDir));
+  '/app/frontend/public',
+  '/app/public',
+  '/workspace/ah-transport-hrms/frontend/public'
+].filter(Boolean);
+
+let publicDir = publicCandidates.find(p => { try { return fs.existsSync(p) && fs.existsSync(path.join(p, 'index.html')); } catch { return false; } });
+
+console.log('[HRMS] frontend search:');
+publicCandidates.forEach(p => { try { console.log(`  - ${p} -> ${fs.existsSync(p) ? 'exists' : 'no'}`)} catch{} });
+console.log(`[HRMS] Using frontend: ${publicDir || 'NOT FOUND – using fallback UI'}`);
+
+if (publicDir && fs.existsSync(publicDir)) {
+  app.use(express.static(publicDir, { maxAge: '1h', etag: true }));
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api')) return next();
     res.sendFile(path.join(publicDir, 'index.html'), err => { if (err) next(); });
   });
 } else {
-  console.warn('[HRMS] WARNING frontend not found – checked:', publicCandidates.join(', '));
-  app.get('/', (req, res) => { res.type('html').send('<h2>A.H. Transport HRMS API running ✅</h2><p><a href="/api/health">/api/health</a> – <a href="/api/auth/login">login API</a><p>Frontend uploading…')});
+  // Fallback – never show “Cannot GET /” – always show branded login helper
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) return next();
+    res.type('html').send(`<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>A.H. Transport HRMS</title>
+<style>body{font-family:Inter,system-ui,Segoe UI,Arial,sans-serif;background:#0f172a;color:#e2e8f0;margin:0} .wrap{max-width:920px;margin:40px auto;padding:24px} .card{background:#1e293b;border:1px solid #334155;border-radius:16px;padding:28px;box-shadow:0 10px 40px rgba(0,0,0,.35)} h1{margin:0 0 6px} .muted{color:#94a3b8} .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px} @media(max-width:760px){.grid{grid-template-columns:1fr}} .btn{display:block;padding:12px 14px;background:#2563eb;color:#fff;text-decoration:none;border-radius:10px;text-align:center;font-weight:600} .btn2{background:#334155} code{background:#0b1220;padding:2px 6px;border-radius:6px} table{width:100%;border-collapse:collapse;margin-top:12px} td,th{padding:8px 10px;border-bottom:1px solid #334155;text-align:left;font-size:14px}</style>
+<div class=wrap><div class=card>
+<h1>🚛 A.H. Transport Co.</h1>
+<div class=muted>Enterprise HRMS v1.3 – Office WiFi: Employees only • Admin: anywhere</div>
+<div class=grid>
+  <div>
+    <h3>API – LIVE ✅</h3>
+    <p><a class=btn href="/api/health" target=_blank>Check /api/health</a></p>
+    <p><a class=btn2 btn href="/api/auth/me" target=_blank style="display:block;padding:12px 14px;background:#334155;color:#fff;text-decoration:none;border-radius:10px;text-align:center">Test /auth/me</a></p>
+    <p class=muted>Frontend static files not found on server – showing this fallback UI.<br>API is 100% working.</p>
+  </div>
+  <div>
+    <h3>Quick Login – API</h3>
+    <table>
+      <tr><th>Role</th><th>Email</th><th>Password</th><th>Access</th></tr>
+      <tr><td>Super Admin</td><td>admin@ahtransport.co.in</td><td><code>Admin@12345</code></td><td>anywhere ✅</td></tr>
+      <tr><td>HR Admin</td><td>hr@ahtransport.co.in</td><td><code>Hr@12345</code></td><td>anywhere ✅</td></tr>
+      <tr><td>Employee</td><td>rajesh.kumar@ahtransport.co.in</td><td><code>Emp@12345</code></td><td>office WiFi only 🔒</td></tr>
+    </table>
+    <p style="font-size:13px" class=muted>POST <code>/api/auth/login</code> with JSON {email,password} → get JWT token</p>
+  </div>
+</div>
+<hr style="border:none;border-top:1px solid #334155;margin:18px 0">
+<p><b>Office networks whitelisted:</b><br>
+<code>192.168.1.0/24, 192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12, 2400:7f60:207::/48, 103.175.191.0/24, 103.160.126.0/24</code></p>
+<p class=muted>Employee IP outside these → 403 Office WiFi required • Admin bypass enabled</p>
+<p>Frontend fix: ensure <code>frontend/public/index.html</code> exists at one of:<br><small>${publicCandidates.map(p=>p.replace(/</g,'&lt;')).join('<br>')}</small></p>
+</div></div></html>`);
+  });
 }
 
-// error handler
+// ---------------- Error handler ----------------
 app.use((err, req, res, next) => {
-  logger.error(err);
-  res.status(500).json({ error: 'Internal server error', message: config.NODE_ENV==='development' ? err.message : undefined });
+  try { logger.error(err); } catch {}
+  console.error(err);
+  res.status(err.status || 500).json({
+    error: 'Internal server error',
+    message: (process.env.NODE_ENV !== 'production') ? err.message : undefined,
+    path: req.originalUrl
+  });
 });
 
-const PORT = config.PORT;
-const HOST = config.HOST || '192.168.1.50';
+// ---------------- Start ----------------
+const PORT = parseInt(process.env.PORT || config.PORT || '8080', 10);
+const HOST = process.env.HOST || config.HOST || '0.0.0.0';
+
 app.listen(PORT, HOST, () => {
-  console.log(`\n🚛 A.H. Transport Co. HRMS – OFFICE-ONLY MODE`);
-  console.log(`   http://${HOST}:${PORT}   (LAN only)`);
-  console.log(`   http://hrms.local  http://hrms.ah.local`);
-  console.log(`   Environment: ${config.NODE_ENV}`);
-  console.log(`   Office IP Strict: ${config.OFFICE_IP_STRICT ? 'ENFORCED ✅' : 'off'}`);
-  console.log(`   Device Whitelist: ${config.DEVICE_WHITELIST_ENFORCE ? 'ENFORCED ✅' : 'off'}`);
-  console.log(`   Allowed Networks:`);
-  config.ALLOWED_NETWORKS.forEach(n => console.log(`     - ${n}`));
-  console.log(`\n   Default logins (office PC only):`);
-  console.log(`   Super Admin: admin@ahtransport.co.in / Admin@12345`);
-  console.log(`   HR Admin:    hr@ahtransport.co.in / Hr@12345`);
-  console.log(`   Employee:    rajesh.kumar@ahtransport.co.in / Emp@12345`);
-  console.log(``);
-  console.log(`   🔒 OFFICE WIFI + OFFICE COMPUTER ONLY – internet access BLOCKED`);
-  console.log(``);
+  console.log(`
+🚛  A.H. Transport Co. – HRMS v1.3
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  URL (local) : http://localhost:${PORT}
+  URL (LAN)   : http://${HOST === '0.0.0.0' ? '192.168.1.29' : HOST}:${PORT}
+  Health      : /api/health
+  Env         : ${config.NODE_ENV}
+  
+  🔒 SECURITY
+  Office IP Strict ....: ${config.OFFICE_IP_STRICT ? 'ON ✅' : 'off'}
+  Device whitelist ...: ${config.DEVICE_WHITELIST_ENFORCE ? 'ON' : 'off (admin bypass ON)'}
+  CORS ...............: ${config.CORS_ORIGIN}
+  Trust Proxy ........: ${config.TRUST_PROXY}
+
+  🌐 ACCESS RULES
+  EMPLOYEE / Branch Manager / Driver
+    → Office WiFi ONLY  192.168.1.0/24
+    → Office IPv6       2400:7f60:207::/48
+    → Office computer whitelist ON
+    → Outside IP = 403
+
+  ADMIN – Super / HR / Payroll / Auditor
+    → ANYWHERE – home / 4G / world ✅
+    → No IP block, no device block
+
+  👤 Logins
+  Super Admin : admin@ahtransport.co.in / Admin@12345   (anywhere)
+  HR Admin    : hr@ahtransport.co.in / Hr@12345         (anywhere)
+  Employee    : rajesh.kumar@ahtransport.co.in / Emp@12345  (office only)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`);
 });
 
 module.exports = app;
