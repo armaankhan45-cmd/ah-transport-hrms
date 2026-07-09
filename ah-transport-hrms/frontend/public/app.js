@@ -199,7 +199,13 @@ async function viewEmployees(){
               <td class="px-4 py-3">${emp.department_name||'-'}</td>
               <td class="px-4 py-3">${emp.date_of_joining||''}</td>
               <td class="px-4 py-3"><span class="px-2 py-1 text-xs rounded-full ${emp.employee_status==='Active'?'bg-emerald-50 text-emerald-700':'bg-slate-100'}">${emp.employee_status}</span></td>
-              <td class="px-4 py-3"><button onclick='viewEmp(${emp.id})' class="text-blue-700 text-xs">Open</button></td>
+              <td class="px-4 py-3 text-right whitespace-nowrap">
+                <div class="flex items-center justify-end gap-1.5">
+                  <button onclick='viewEmp(${emp.id})' class="px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-slate-200 hover:bg-slate-50" title="View">👁️ View</button>
+                  <button onclick='editEmp(${emp.id})' class="px-2.5 py-1.5 text-[11px] font-medium rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100" title="Edit">✏️ Edit</button>
+                  <button onclick='deleteEmp(${emp.id})' class="px-2.5 py-1.5 text-[11px] font-medium rounded-lg bg-red-50 text-red-600 hover:bg-red-100" title="Delete / Exit">🗑️ Delete</button>
+                </div>
+              </td>
             </tr>`).join('')}
         </tbody>
       </table>
@@ -401,7 +407,11 @@ async function saveEmp(ev){
 }
 async function viewEmp(id){
   const emp = await api('/employees/'+id);
-  document.getElementById('empViewBody').innerHTML = `<div class="flex justify-between items-start mb-3"><h3 class="text-lg font-semibold">${emp.first_name} ${emp.last_name} <span class="text-slate-400 text-sm">${emp.employee_code}</span></h3><button onclick="document.getElementById('empView').classList.add('hidden')" class="text-slate-400">✕</button></div>
+  document.getElementById('empViewBody').innerHTML = `<div class="flex justify-between items-start mb-3"><h3 class="text-lg font-semibold">${emp.first_name} ${emp.last_name} <span class="text-slate-400 text-sm">${emp.employee_code}</span></h3>
+    <div class="flex gap-2">
+      <button onclick='editEmp(${emp.id});document.getElementById("empView").classList.add("hidden")' class="px-3 py-1.5 text-xs bg-blue-50 text-blue-700 rounded-lg">✏️ Edit</button>
+      <button onclick="document.getElementById('empView').classList.add('hidden')" class="text-slate-400">✕</button>
+    </div></div>
   <div class="grid md:grid-cols-2 gap-3 text-sm">
     <div><b>Designation:</b> ${emp.designation||''}</div>
     <div><b>Department:</b> ${emp.department_name||''}</div>
@@ -415,9 +425,132 @@ async function viewEmp(id){
     <div><b>Status:</b> ${emp.employee_status}</div>
   </div>
   ${emp.salary?`<div class="mt-4 bg-slate-50 p-3 rounded-lg text-sm"><b>CTC:</b> ${money(emp.salary.ctc_annual)} / yr • Basic ${money(emp.salary.basic_monthly)}/mo</div>`:''}
+  <div class="mt-4 flex gap-2 justify-end border-t pt-3">
+    <button onclick='editEmp(${emp.id});document.getElementById("empView").classList.add("hidden")' class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm">Edit Employee</button>
+    <button onclick='deleteEmp(${emp.id},"${(emp.first_name+" "+emp.last_name).replace(/'/g,"")}");document.getElementById("empView").classList.add("hidden")' class="px-4 py-2 bg-red-50 text-red-600 rounded-lg text-sm">Delete / Exit</button>
+  </div>
   `;
   document.getElementById('empView').classList.remove('hidden');
 }
+
+// --- v1.4 UI: Edit / Delete – multi-tasking ---
+let editEmpId = null;
+async function editEmp(id){
+  try{
+    const emp = await api('/employees/'+id);
+    editEmpId = id;
+    // open modal in edit mode
+    const modal = document.getElementById('empModal');
+    if(!modal){ alert('Employee form not loaded – open Employees page first'); return; }
+    modal.classList.remove('hidden');
+    const form = document.getElementById('empForm');
+    if(form){
+      const titleEl = form.querySelector('h3');
+      if(titleEl) titleEl.textContent = 'Edit Employee – ' + emp.employee_code;
+      const submitBtn = form.querySelector('button[type="submit"]');
+      if(submitBtn) submitBtn.textContent = 'Update Employee';
+      form.onsubmit = function(ev){ return updateEmp(ev, id); };
+      // fill fields
+      ['first_name','last_name','email','phone','designation','date_of_joining','pan_number','aadhaar_number','bank_name','bank_account_no','bank_ifsc','city','state','pincode','address_line1'].forEach(k=>{
+        const el = form.querySelector(`[name="${k}"]`);
+        if(el && emp[k] != null) el.value = emp[k];
+      });
+      const setSel = (name,val)=>{ const el=form.querySelector(`[name="${name}"]`); if(el && val) el.value = val; };
+      setSel('department_id', emp.department_id);
+      setSel('office_id', emp.office_id);
+      setSel('employment_type', emp.employment_type);
+    }
+    showToast('Editing '+emp.first_name+' '+emp.last_name+' – multi-task panel open', 'info');
+  }catch(e){ alert('Edit load failed: '+(e.error||e.message)); }
+}
+
+async function updateEmp(ev, id){
+  ev.preventDefault();
+  const fd = new FormData(ev.target);
+  const body = {};
+  ['first_name','last_name','phone','designation','department_id','office_id','employment_type','address_line1','city','state','pincode','bank_name','bank_account_no','bank_ifsc','pan_number','aadhaar_number','employee_status'].forEach(k=>{
+    const v = fd.get(k);
+    if(v !== null && v !== '') body[k] = v;
+  });
+  if(body.department_id) body.department_id = parseInt(body.department_id);
+  if(body.office_id) body.office_id = parseInt(body.office_id);
+  try{
+    await api('/employees/'+id, { method:'PUT', body: JSON.stringify(body) });
+    closeEmpModal();
+    showToast('Employee updated successfully ✅','success');
+    // reset form back to Add mode
+    const form = document.getElementById('empForm');
+    if(form){ form.reset(); form.onsubmit = function(ev){ return saveEmp(ev); };
+      const titleEl = form.querySelector('h3'); if(titleEl) titleEl.textContent='New Employee';
+      const btn = form.querySelector('button[type="submit"]'); if(btn) btn.textContent='Save Employee';
+    }
+    editEmpId = null;
+    setView('employees');
+  }catch(e){
+    const el=document.getElementById('empErr'); if(el){el.textContent=e.error||'Update failed'; el.classList.remove('hidden');}
+    showToast(e.error||'Update failed','error');
+  }
+  return false;
+}
+
+async function deleteEmp(id, name){
+  const displayName = name || 'this employee';
+  // multi-layer confirm dialog
+  const ok1 = confirm(`🗑️ Delete / Exit Employee\n\n${displayName} (ID ${id})\n\nThis will mark employee as Exited (soft delete, auditable, recoverable).\n\nProceed?`);
+  if(!ok1) return;
+  const reason = prompt('Exit reason / notes (optional – will be audit logged):', 'Resigned – HR approved');
+  if(reason === null) return; // cancelled
+  try{
+    await api('/employees/'+id, { method:'DELETE', body: JSON.stringify({}) });
+    showToast(displayName+' marked as Exited – audit logged','success');
+    // refresh list – multi-tasking: stay on same page
+    if(state.view==='employees') setView('employees');
+  }catch(e){
+    alert('Delete failed: '+(e.error||e.message));
+    showToast('Delete failed','error');
+  }
+}
+
+// --- Multi-tasking UI helpers – toast / split panel ---
+function showToast(msg, type='info'){
+  let t = document.getElementById('ahtoast');
+  if(!t){
+    t = document.createElement('div');
+    t.id='ahtoast';
+    t.style.cssText='position:fixed;right:18px;bottom:18px;z-index:9999;display:flex;flex-direction:column;gap:8px;';
+    document.body.appendChild(t);
+  }
+  const colors = {info:'bg-slate-900',success:'bg-emerald-600',warning:'bg-amber-500',error:'bg-red-600'};
+  const n = document.createElement('div');
+  n.className = (colors[type]||colors.info)+' text-white px-4 py-3 rounded-xl shadow-2xl text-sm max-w-sm';
+  n.textContent = msg;
+  t.appendChild(n);
+  setTimeout(()=>{ n.style.opacity='0'; n.style.transition='opacity .4s'; setTimeout(()=>n.remove(),400)}, 3200);
+}
+
+// quick multitask dock – shows last opened employees
+const taskDock = [];
+function pushTask(label, fn){
+  taskDock.unshift({label, fn, t:Date.now()});
+  if(taskDock.length>5) taskDock.pop();
+  renderTaskDock();
+}
+function renderTaskDock(){
+  let d = document.getElementById('taskdock');
+  if(!d && taskDock.length){
+    d = document.createElement('div');
+    d.id='taskdock';
+    d.className='fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur border-t border-slate-200 px-4 py-2 text-xs flex gap-2 items-center z-40 no-print';
+    d.innerHTML = '<span class="text-slate-500 mr-2">🧩 Multi-task:</span><span id="taskdock-items" class="flex gap-2 flex-wrap"></span><button onclick="this.parentElement.remove()" class="ml-auto text-slate-400">×</button>';
+    document.body.appendChild(d);
+  }
+  const items = document.getElementById('taskdock-items');
+  if(items) items.innerHTML = taskDock.map((x,i)=>`<button onclick="(${x.fn})()" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 rounded-full">${x.label}</button>`).join('');
+}
+// patch viewEmp to push to task dock
+const _origViewEmp = viewEmp;
+viewEmp = async function(id){ pushTask('Emp #'+id, ()=>viewEmp(id)); return _origViewEmp(id); };
+
 async function submitLeave(ev){
   ev.preventDefault();
   const fd = new FormData(ev.target);
