@@ -1,0 +1,17 @@
+# Cloud-ready – Render / Railway / Fly
+FROM node:20-alpine
+WORKDIR /app
+RUN apk add --no-cache python3 make g++ sqlite
+COPY backend/package*.json ./backend/
+RUN cd backend && npm ci --omit=dev
+COPY . .
+ENV NODE_ENV=production
+ENV HOST=0.0.0.0
+ENV PORT=8080
+ENV OFFICE_IP_STRICT=true
+ENV DEVICE_WHITELIST_ENFORCE=false
+ENV TRUST_PROXY=true
+ENV CORS_ORIGIN=*
+EXPOSE 8080
+WORKDIR /app/backend
+CMD ["node", "src/server.js"]

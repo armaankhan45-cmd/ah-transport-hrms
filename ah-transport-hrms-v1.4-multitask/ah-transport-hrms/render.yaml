@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: ah-transport-hrms
+    env: node
+    plan: free
+    buildCommand: cd backend && npm ci
+    startCommand: cd backend && node src/server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 10000
+      - key: JWT_SECRET
+        generateValue: true
+      - key: OFFICE_IP_STRICT
+        value: true
+      - key: DEVICE_WHITELIST_ENFORCE
+        value: false
+      - key: TRUST_PROXY
+        value: true
+      - key: CORS_ORIGIN
+        value: "*"
+      - key: ALLOWED_NETWORKS
+        value: 192.168.1.0/24,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,127.0.0.1/32,::1/128,2400:7f60:207::/48,103.175.191.0/24,103.160.126.0/24
+    disk:
+      name: hrms-data
+      mountPath: /opt/render/project/src/database
+      sizeGB: 1
